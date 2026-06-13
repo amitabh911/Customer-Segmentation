@@ -191,3 +191,135 @@ elif page == "👥 Segments":
     st.subheader("📦 RFM Spread by Segment")
     metric = st.selectbox("Select Metric",
                           ["Recency","Frequency","Monetary"])
+    fig = px.box(
+        rfm,
+        x="Segment",
+        y=metric,
+        color="Segment",
+        title=f"{metric} by Segment",
+        color_discrete_map=COLORS
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════
+# PAGE 3 — CUSTOMER LOOKUP
+# ════════════════════════════════════════════════════════════
+elif page == "🔍 Customer Lookup":
+
+    st.title("🔍 Customer Lookup")
+    st.markdown("---")
+
+    selected_segment = st.selectbox(
+        "Filter by Segment",
+        ["All"] + list(rfm["Segment"].unique())
+    )
+
+    if selected_segment == "All":
+        filtered = rfm
+    else:
+        filtered = rfm[rfm["Segment"] == selected_segment]
+
+    st.markdown(f"**Showing {len(filtered):,} customers**")
+    st.dataframe(
+        filtered[["CustomerID","Recency","Frequency",
+                  "Monetary","Segment"]].reset_index(drop=True),
+        use_container_width=True
+    )
+
+    st.markdown("---")
+
+    st.subheader("🔎 Search by Customer ID")
+    customer_id = st.number_input(
+        "Enter Customer ID",
+        min_value=int(rfm["CustomerID"].min()),
+        max_value=int(rfm["CustomerID"].max()),
+        step=1
+    )
+
+    if st.button("Search"):
+        result = rfm[rfm["CustomerID"] == customer_id]
+        if len(result) > 0:
+            r = result.iloc[0]
+            st.success("Customer Found!")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Recency",   f"{r['Recency']} days")
+            c2.metric("Frequency", f"{r['Frequency']} orders")
+            c3.metric("Monetary",  f"£{r['Monetary']:.2f}")
+            c4.metric("Segment",   r["Segment"])
+        else:
+            st.error("Customer ID not found.")
+
+
+# ════════════════════════════════════════════════════════════
+# PAGE 4 — PREDICT SEGMENT
+# ════════════════════════════════════════════════════════════
+elif page == "🤖 Predict Segment":
+
+    st.title("🤖 Predict Customer Segment")
+    st.markdown("Enter a new customer's RFM values to predict their segment.")
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        recency   = st.number_input(
+            "Recency (days since last purchase)",
+            min_value=1, max_value=365, value=30
+        )
+    with col2:
+        frequency = st.number_input(
+            "Frequency (number of orders)",
+            min_value=1, max_value=200, value=5
+        )
+    with col3:
+        monetary  = st.number_input(
+            "Monetary (total spend £)",
+            min_value=1, max_value=50000, value=500
+        )
+
+    st.markdown("---")
+
+    if st.button("🔮 Predict Segment", use_container_width=True):
+
+        # Build input
+        new_customer = pd.DataFrame({
+            "Recency"   : [recency],
+            "Frequency" : [frequency],
+            "Monetary"  : [monetary]
+        })
+
+        # Apply same transformations
+        new_log         = np.log1p(new_customer)
+        new_log.columns = ["R_log", "F_log", "M_log"]
+        new_scaled      = scaler.transform(new_log)
+
+        # Predict using KMeans
+        predicted_cluster  = kmeans.predict(new_scaled)[0]
+        cluster_to_segment = rfm.drop_duplicates("KMeans_Cluster").set_index(
+            "KMeans_Cluster")["Segment"].to_dict()
+        predicted_segment  = cluster_to_segment.get(
+            predicted_cluster, "Unknown"
+        )
+
+        # Show result
+        color = COLORS.get(predicted_segment, "#ffffff")
+        st.markdown(f"""
+        <div style='background-color:{color}; padding:30px;
+                    border-radius:12px; text-align:center;'>
+            <h1 style='color:black;'>{predicted_segment}</h1>
+            <h3 style='color:black;'>Cluster {predicted_cluster}</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        st.subheader("💡 Recommended Action")
+        actions = {
+            "🏆 Champions"            : "Reward with loyalty points, early access to new products, and exclusive offers. These are your most valuable customers — keep them engaged.",
+            "🌱 New/Recent Customers" : "Send a welcome series, offer a discount on second purchase, and educate them about your product range.",
+            "⚠️ At Risk"              : "Send a win-back email campaign with a special discount. Act quickly before they leave permanently.",
+            "💤 Lost Customers"       : "Try one last re-engagement campaign. If no response, focus budget on other segments."
+        }
+        st.info(actions.get(predicted_segment,
+                            "No recommendation available."))
